@@ -994,8 +994,15 @@ html,body{
   </div>
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" async></script>
 <script>
+/* Wait for html2canvas to load before enabling export */
+window._h2cReady=new Promise(resolve=>{
+  if(typeof html2canvas!=='undefined'){resolve();return;}
+  const s=document.querySelector('script[src*="html2canvas"]');
+  if(s){s.addEventListener('load',resolve);s.addEventListener('error',resolve);}
+  else resolve();
+});
 /* ════════════ MOBILE DRAWER ════════════ */
 function toggleDrawer(){
   const sb=document.getElementById('sidebar');
@@ -1197,39 +1204,45 @@ function startSidebarAdd(){
 
   let committed=false;
 
-  function commit(){
-    if(committed)return;
-    committed=true;
-    /* Defer past iOS keyboard dismissal to avoid Safari NotFoundError */
-    const label=input.textContent.trim();
-    setTimeout(()=>{
-      /* Guard: card may already be reset if Escape was pressed */
-      if(!card.classList.contains('is-editing'))return;
-      resetAddCard();
-      if(label){sideItems.unshift({id:uid(),label});renderSidebar();schedSave();}
-    },0);
-  }
   function resetAddCard(){
     card.classList.remove('is-editing');
     card.innerHTML=`<div class="sb-add-card-icon">+</div><span class="sb-add-card-label">Add edge case</span>`;
     card.onclick=startSidebarAdd;
   }
-  input.addEventListener('keydown',e=>{
+
+  function doSubmit(){
+    if(committed)return;
+    committed=true;
+    const label=input.textContent.trim();
+    setTimeout(()=>{
+      if(!card.classList.contains('is-editing'))return;
+      resetAddCard();
+      if(label){sideItems.unshift({id:uid(),label});renderSidebar();schedSave();}
+    },0);
+  }
+
+  function onKey(e){
     if(e.key==='Enter'&&!e.shiftKey){
       e.preventDefault();
+      e.stopPropagation();
       committed=true;
       const label=input.textContent.trim();
       resetAddCard();
       if(label){sideItems.unshift({id:uid(),label});renderSidebar();schedSave();}
+      return;
     }
     if(e.key==='Escape'){
       e.preventDefault();
+      e.stopPropagation();
       committed=true;
       resetAddCard();
+      return;
     }
     e.stopPropagation();
-  });
-  input.addEventListener('blur',commit);
+  }
+
+  input.addEventListener('keydown',onKey);
+  input.addEventListener('blur',doSubmit);
 }
 
 function clearSideDropHighlight(){
@@ -1354,35 +1367,49 @@ function createCardEl(card){
 function wireSubmittedCard(el,lbl,acts,id){
   lbl.style.pointerEvents='none';
 
-  el.querySelector('[data-act="edit"]').addEventListener('click',e=>{e.stopPropagation();enterEditMode(el,lbl,acts,id);});
-  el.querySelector('[data-act="remove"]').addEventListener('click',e=>{e.stopPropagation();removeMapCard(id);});
+  /* Reset card-actions visibility so CSS hover works correctly */
+  acts.style.opacity='';
+  acts.style.pointerEvents='';
 
-  /* Mouse drag — also handles drag-to-sidebar via pointer position on mouseup */
-  el.addEventListener('mousedown',e=>{
-    if(e.target.closest('.ca-btn'))return;
-    e.preventDefault();
-    mouseDrag={id,startX:e.clientX,startY:e.clientY,moved:false};
-    document.addEventListener('mousemove',onMouseMove);
-    document.addEventListener('mouseup',onMouseUp);
-  });
+  /* Clone action buttons to strip any previously attached listeners */
+  const oldEdit=acts.querySelector('[data-act="edit"]');
+  const oldRemove=acts.querySelector('[data-act="remove"]');
+  const newEdit=oldEdit.cloneNode(true);
+  const newRemove=oldRemove.cloneNode(true);
+  oldEdit.replaceWith(newEdit);
+  oldRemove.replaceWith(newRemove);
 
-  /* Touch drag */
-  el.addEventListener('touchstart',e=>{
-    if(e.target.closest('.ca-btn'))return;
-    e.preventDefault();
-    const t=e.touches[0];
-    mouseDrag={id,startX:t.clientX,startY:t.clientY,moved:false};
-    document.addEventListener('touchmove',onTouchMove,{passive:false});
-    document.addEventListener('touchend',onTouchEnd);
-  },{passive:false});
+  newEdit.addEventListener('click',e=>{e.stopPropagation();enterEditMode(el,lbl,acts,id);});
+  newRemove.addEventListener('click',e=>{e.stopPropagation();removeMapCard(id);});
+
+  /* Remove any existing drag listeners by cloning the element shell
+     — only do this if not already wired (check dataset flag) */
+  if(!el.dataset.wired){
+    el.dataset.wired='1';
+    el.addEventListener('mousedown',e=>{
+      if(e.target.closest('.ca-btn'))return;
+      e.preventDefault();
+      mouseDrag={id,startX:e.clientX,startY:e.clientY,moved:false};
+      document.addEventListener('mousemove',onMouseMove);
+      document.addEventListener('mouseup',onMouseUp);
+    });
+    el.addEventListener('touchstart',e=>{
+      if(e.target.closest('.ca-btn'))return;
+      e.preventDefault();
+      const t=e.touches[0];
+      mouseDrag={id,startX:t.clientX,startY:t.clientY,moved:false};
+      document.addEventListener('touchmove',onTouchMove,{passive:false});
+      document.addEventListener('touchend',onTouchEnd);
+    },{passive:false});
+  }
 }
 
 function attachTypingHandlers(el,lbl,id){
-  let handled=false;
+  let committed=false;
 
-  function submit(){
-    if(handled)return;
-    handled=true;
+  function doSubmit(){
+    if(committed)return;
+    committed=true;
     const text=lbl.textContent.trim();
     if(!text){
       mapCards=mapCards.filter(c=>c.id!==id);
@@ -1404,25 +1431,35 @@ function attachTypingHandlers(el,lbl,id){
   function onKey(e){
     if(e.key==='Enter'&&!e.shiftKey){
       e.preventDefault();
-      handled=true;
-      submit();
-      lbl.blur();
+      e.stopPropagation();
+      doSubmit();          /* submit first */
+      lbl.blur();          /* then blur — onBlur will see committed=true and skip */
+      return;
     }
     if(e.key==='Escape'){
+      e.stopPropagation();
+      committed=true;      /* prevent onBlur from submitting */
       const c=mapCards.find(c=>c.id===id);
-      if(c&&!c.label){mapCards=mapCards.filter(c=>c.id!==id);if(el.parentNode)el.remove();updateEmptyState();schedSave();}
-      else if(c){lbl.textContent=c.label;}
-      handled=true;
+      if(c&&!c.label){
+        mapCards=mapCards.filter(c=>c.id!==id);
+        if(el.parentNode)el.remove();
+        updateEmptyState();schedSave();
+      } else if(c){
+        lbl.textContent=c.label;
+      }
       lbl.blur();
+      return;
     }
     e.stopPropagation();
   }
+
   function onBlur(){
     lbl.removeEventListener('keydown',onKey);
     lbl.removeEventListener('blur',onBlur);
-    /* Defer past iOS Safari keyboard dismissal to avoid NotFoundError */
-    setTimeout(submit,0);
+    /* Defer for iOS Safari — if already committed (Enter/Escape), this is a no-op */
+    setTimeout(doSubmit, 0);
   }
+
   lbl.addEventListener('keydown',onKey);
   lbl.addEventListener('blur',onBlur);
 }
@@ -1433,7 +1470,9 @@ function enterEditMode(el,lbl,acts,id){
   el.draggable=false;
   lbl.setAttribute('contenteditable','true');
   lbl.style.pointerEvents='auto';
-  acts.style.opacity='0';acts.style.pointerEvents='none';
+  /* hide actions while editing — wireSubmittedCard resets this */
+  acts.style.opacity='0';
+  acts.style.pointerEvents='none';
   lbl.focus();placeCaretEnd(lbl);
   card.typing=true;
   attachTypingHandlers(el,lbl,id);
@@ -1636,12 +1675,14 @@ function copyMd(){
 }
 async function exportJpg(){
   const btn=[...document.querySelectorAll('.tool-btn')].find(b=>b.textContent.includes('Export'));
-  if(btn){btn.textContent='Exporting…';btn.disabled=true;}
+  if(btn){const lbl=btn.querySelector('.btn-label');if(lbl)lbl.textContent='Exporting…';btn.disabled=true;}
   try{
+    await(window._h2cReady||Promise.resolve());
+    if(typeof html2canvas==='undefined')throw new Error('Export library not loaded. Please try again.');
     const c=await html2canvas(document.getElementById('canvas'),{scale:2,backgroundColor:'#FFFFFF',useCORS:true,logging:false});
-    const link=document.createElement('a');link.download='states-map.jpg';link.href=c.toDataURL('image/jpeg',0.93);link.click();
+    const link=document.createElement('a');link.download='edgely-map.jpg';link.href=c.toDataURL('image/jpeg',0.93);link.click();
   }catch(err){alert('Export failed: '+err.message);}
-  if(btn){btn.textContent='Export JPG';btn.disabled=false;}
+  if(btn){const lbl=btn.querySelector('.btn-label');if(lbl)lbl.textContent='Export JPG';btn.disabled=false;}
 }
 
 /* ════════════ INIT ════════════ */
