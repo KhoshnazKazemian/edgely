@@ -1,5 +1,8 @@
 # Edgely by KK
 
+[![Thumbnail](Thumbnail.png)](https://edgely-teal.vercel.app)
+
+
 **Map edge cases before shipping.**
 
 Edgely is a tiny, focused tool for product designers and engineers to surface, prioritise, and document edge cases before handoff, not after. It turns the invisible work of thinking through failure states into a visual, collaborative artefact.
