@@ -1,0 +1,14 @@
+# macOS system files
+.DS_Store
+
+# Screenshots
+*.jpg
+*.jpeg
+*.png
+
+# Vercel
+.vercel
+
+# Optional (future safety)
+node_modules/
+.env
