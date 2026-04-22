@@ -1051,11 +1051,11 @@ function closeDrawer(){
   /* Show text container */
   textEl.style.opacity='1';
 
-  /* Dismiss after calm reading time */
+  /* Dismiss after calm reading time — text fully in at ~4.2s, dismiss at 4.6s */
   setTimeout(()=>{
     splash.classList.add('leaving');
     setTimeout(()=>splash.remove(),1200);
-  },5200);
+  },4600);
 })();
 
 /* ════════════ THEME ════════════ */
@@ -1675,14 +1675,129 @@ function copyMd(){
 }
 async function exportJpg(){
   const btn=[...document.querySelectorAll('.tool-btn')].find(b=>b.textContent.includes('Export'));
-  if(btn){const lbl=btn.querySelector('.btn-label');if(lbl)lbl.textContent='Exporting…';btn.disabled=true;}
+  const btnLbl=btn?.querySelector('.btn-label');
+  if(btnLbl)btnLbl.textContent='Exporting…';
+  if(btn)btn.disabled=true;
+
+  const canvas=document.getElementById('canvas');
+  const isDark=document.documentElement.getAttribute('data-theme')==='dark';
+
+  /* Solid card colours — light and dark versions */
+  const SOLID={
+    light:{
+      'q-now':'#FDDDD8','q-next':'#FDEFD6','q-nice':'#D8EFE6','q-back':'#EAE7F5'
+    },
+    dark:{
+      'q-now':'#4A1A12','q-next':'#3D2800','q-nice':'#0C2E22','q-back':'#1E1830'
+    }
+  };
+  const palette=isDark?SOLID.dark:SOLID.light;
+  const canvasBg=isDark?'#16122A':'#FFFFFF';
+
   try{
     await(window._h2cReady||Promise.resolve());
     if(typeof html2canvas==='undefined')throw new Error('Export library not loaded. Please try again.');
-    const c=await html2canvas(document.getElementById('canvas'),{scale:2,backgroundColor:'#FFFFFF',useCORS:true,logging:false});
-    const link=document.createElement('a');link.download='edgely-map.jpg';link.href=c.toDataURL('image/jpeg',0.93);link.click();
-  }catch(err){alert('Export failed: '+err.message);}
-  if(btn){const lbl=btn.querySelector('.btn-label');if(lbl)lbl.textContent='Export JPG';btn.disabled=false;}
+
+    const rect=canvas.getBoundingClientRect();
+    const W=rect.width, H=rect.height;
+
+    const shot=await html2canvas(canvas,{
+      scale:2,
+      backgroundColor:canvasBg,
+      useCORS:true,
+      logging:false,
+      width:W,
+      height:H,
+      ignoreElements:(el)=>{
+        /* Skip the ambient orb pseudo-elements and empty state */
+        return el.classList&&(el.classList.contains('empty-state')||el.classList.contains('click-ripple'));
+      },
+      onclone:(doc)=>{
+        const clonedCanvas=doc.getElementById('canvas');
+        if(!clonedCanvas)return;
+
+        /* Force fully opaque canvas — no rgba, no gradients, no bleed from body */
+        clonedCanvas.style.cssText+=`;
+          background:${canvasBg}!important;
+          background-image:none!important;
+          background-color:${canvasBg}!important;
+          backdrop-filter:none!important;
+          -webkit-backdrop-filter:none!important;
+          box-shadow:none!important;
+          border:1px solid rgba(0,0,0,0.08)!important;
+        `;
+        /* Remove pseudo-element effects */
+        const style=doc.createElement('style');
+        style.textContent=`
+          html,body{background:${canvasBg}!important;background-image:none!important;}
+          #canvas{
+            background:${canvasBg}!important;
+            background-image:none!important;
+            background-color:${canvasBg}!important;
+          }
+          #canvas::before,#canvas::after{
+            display:none!important;
+            background:none!important;
+            content:none!important;
+            opacity:0!important;
+          }
+          .app::before,.app::after{display:none!important;opacity:0!important;}
+          .map-card{
+            backdrop-filter:none!important;
+            -webkit-backdrop-filter:none!important;
+            box-shadow:0 2px 8px rgba(0,0,0,0.15)!important;
+          }
+          .card-actions{display:none!important;}
+          .click-ripple,.empty-state{display:none!important;}
+        `;
+        doc.head.appendChild(style);
+
+        /* Fix each card: replace % + transform positioning with absolute px,
+           apply solid background covering the full card */
+        clonedCanvas.querySelectorAll('.map-card').forEach(card=>{
+          /* Determine quadrant */
+          let q='q-back';
+          ['q-now','q-next','q-nice','q-back'].forEach(c=>{if(card.classList.contains(c))q=c;});
+
+          /* Convert % position to px, remove transform */
+          const leftPct=parseFloat(card.style.left)||0;
+          const topPct=parseFloat(card.style.top)||0;
+          const pxLeft=(leftPct/100)*W;
+          const pxTop=(topPct/100)*H;
+
+          /* Get natural card size (approx) */
+          const cW=card.offsetWidth||120;
+          const cH=card.offsetHeight||36;
+
+          card.style.left=(pxLeft - cW/2)+'px';
+          card.style.top=(pxTop - cH/2)+'px';
+          card.style.transform='none';
+          card.style.position='absolute';
+          card.style.background=palette[q];
+          card.style.backdropFilter='none';
+          card.style.webkitBackdropFilter='none';
+
+          /* Text colour */
+          const textColors={
+            light:{'q-now':'#B83220','q-next':'#8A5000','q-nice':'#1B7A5A','q-back':'#7060A0'},
+            dark: {'q-now':'#FFB4A0','q-next':'#FFCC88','q-nice':'#88F0C0','q-back':'#C4B0FF'}
+          };
+          card.style.color=textColors[isDark?'dark':'light'][q];
+        });
+      }
+    });
+
+    const link=document.createElement('a');
+    link.download='edgely-map.jpg';
+    link.href=shot.toDataURL('image/jpeg',0.95);
+    link.click();
+
+  }catch(err){
+    alert('Export failed: '+err.message);
+  }
+
+  if(btnLbl)btnLbl.textContent='Export JPG';
+  if(btn)btn.disabled=false;
 }
 
 /* ════════════ INIT ════════════ */
